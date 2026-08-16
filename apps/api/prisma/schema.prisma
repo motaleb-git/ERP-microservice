@@ -1,0 +1,384 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["identity", "organization", "platform"]
+}
+
+enum OrganizationStatus {
+  trial
+  active
+  suspended
+  closed
+
+  @@schema("organization")
+}
+
+enum MembershipStatus {
+  invited
+  active
+  disabled
+
+  @@schema("organization")
+}
+
+enum FiscalStatus {
+  open
+  closed
+
+  @@schema("organization")
+}
+
+model User {
+  id              String    @id @db.Uuid
+  email           String    @unique
+  passwordHash    String    @map("password_hash")
+  name            String
+  isActive        Boolean   @default(true) @map("is_active")
+  isPlatformAdmin Boolean   @default(false) @map("is_platform_admin")
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz
+  totpEnabled     Boolean   @default(false) @map("totp_enabled")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+
+  totp         UserTotp?
+  backupCodes  UserTotpBackupCode[]
+  sessions     Session[]
+  memberships  OrganizationMember[]
+  userRoles    UserRole[]
+
+  @@map("users")
+  @@schema("identity")
+}
+
+model UserTotp {
+  userId          String    @id @map("user_id") @db.Uuid
+  secretEncrypted String    @map("secret_encrypted")
+  verifiedAt      DateTime? @map("verified_at") @db.Timestamptz
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_totp")
+  @@schema("identity")
+}
+
+model UserTotpBackupCode {
+  id        String    @id @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  usedAt    DateTime? @map("used_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_totp_backup_codes")
+  @@schema("identity")
+}
+
+model Session {
+  id                   String    @id @db.Uuid
+  userId               String    @map("user_id") @db.Uuid
+  familyId             String    @map("family_id") @db.Uuid
+  refreshTokenHash     String    @unique @map("refresh_token_hash")
+  replacedBySessionId  String?   @map("replaced_by_session_id") @db.Uuid
+  expiresAt            DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt            DateTime? @map("revoked_at") @db.Timestamptz
+  userAgent            String?   @map("user_agent")
+  ip                   String?
+  lastUsedAt           DateTime  @default(now()) @map("last_used_at") @db.Timestamptz
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("sessions")
+  @@schema("identity")
+}
+
+model LoginAttempt {
+  id        String   @id @db.Uuid
+  email     String
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([email, createdAt])
+  @@map("login_attempts")
+  @@schema("identity")
+}
+
+model Permission {
+  id              String           @id @db.Uuid
+  code            String           @unique
+  resource        String
+  action          String
+  description     String           @default("")
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+  @@schema("identity")
+}
+
+model Role {
+  id             String           @id @db.Uuid
+  organizationId String?          @map("organization_id") @db.Uuid
+  code           String
+  name           String
+  isSystem       Boolean          @default(false) @map("is_system")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+  organization   Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rolePermissions RolePermission[]
+  userRoles      UserRole[]
+
+  @@index([organizationId, code])
+  @@map("roles")
+  @@schema("identity")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+  @@schema("identity")
+}
+
+model UserRole {
+  id             String        @id @db.Uuid
+  userId         String        @map("user_id") @db.Uuid
+  roleId         String        @map("role_id") @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  branchId       String?       @map("branch_id") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           Role          @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch         Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, userId])
+  @@map("user_roles")
+  @@schema("identity")
+}
+
+model Organization {
+  id           String             @id @db.Uuid
+  slug         String             @unique
+  name         String
+  status       OrganizationStatus @default(trial)
+  baseCurrency String             @default("BDT") @map("base_currency") @db.Char(3)
+  timezone     String             @default("Asia/Dhaka")
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  members          OrganizationMember[]
+  branches         Branch[]
+  departments      Department[]
+  designations     Designation[]
+  fiscalYears      FiscalYear[]
+  businessSettings BusinessSettings?
+  roles            Role[]
+  userRoles        UserRole[]
+
+  @@map("organizations")
+  @@schema("organization")
+}
+
+model OrganizationMember {
+  id             String           @id @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  status         MembershipStatus @default(invited)
+  permissionVersion Int           @default(1) @map("permission_version")
+  joinedAt       DateTime?        @map("joined_at") @db.Timestamptz
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("organization_members")
+  @@schema("organization")
+}
+
+model Branch {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  code           String
+  name           String
+  addressJson    Json?        @map("address_json")
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  departments    Department[]
+  userRoles      UserRole[]
+
+  @@unique([organizationId, code])
+  @@map("branches")
+  @@schema("organization")
+}
+
+model Department {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  branchId       String?      @map("branch_id") @db.Uuid
+  code           String
+  name           String
+  parentId       String?      @map("parent_id") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch         Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  parent         Department?  @relation("DepartmentTree", fields: [parentId], references: [id])
+  children       Department[] @relation("DepartmentTree")
+
+  @@unique([organizationId, code])
+  @@map("departments")
+  @@schema("organization")
+}
+
+model Designation {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  code           String
+  name           String
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, code])
+  @@map("designations")
+  @@schema("organization")
+}
+
+model FiscalYear {
+  id             String         @id @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  name           String
+  startsOn       DateTime       @map("starts_on") @db.Date
+  endsOn         DateTime       @map("ends_on") @db.Date
+  status         FiscalStatus   @default(open)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  periods        FiscalPeriod[]
+
+  @@map("fiscal_years")
+  @@schema("organization")
+}
+
+model FiscalPeriod {
+  id             String     @id @db.Uuid
+  fiscalYearId   String     @map("fiscal_year_id") @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  name           String
+  startsOn       DateTime   @map("starts_on") @db.Date
+  endsOn         DateTime   @map("ends_on") @db.Date
+  status         FiscalStatus @default(open)
+  fiscalYear     FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+
+  @@map("fiscal_periods")
+  @@schema("organization")
+}
+
+model BusinessSettings {
+  organizationId            String       @id @map("organization_id") @db.Uuid
+  invoicePrefix             String       @default("INV") @map("invoice_prefix")
+  quotePrefix               String       @default("QUO") @map("quote_prefix")
+  inventoryNegativeAllowed  Boolean      @default(false) @map("inventory_negative_allowed")
+  settingsJson              Json         @default("{}") @map("settings_json")
+  updatedAt                 DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  organization              Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("business_settings")
+  @@schema("organization")
+}
+
+model OutboxEvent {
+  id              String    @id @db.Uuid
+  organizationId  String?   @map("organization_id") @db.Uuid
+  aggregateType   String    @map("aggregate_type")
+  aggregateId     String    @map("aggregate_id") @db.Uuid
+  eventType       String    @map("event_type")
+  eventVersion    Int       @map("event_version")
+  payload         Json      @map("payload_jsonb")
+  correlationId   String    @map("correlation_id")
+  causationId     String?   @map("causation_id")
+  actorId         String?   @map("actor_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt     DateTime? @map("published_at") @db.Timestamptz
+  publishAttempts Int       @default(0) @map("publish_attempts")
+
+  @@index([createdAt])
+  @@map("outbox_events")
+  @@schema("platform")
+}
+
+model InboxMessage {
+  eventId      String   @map("event_id")
+  consumerName String   @map("consumer_name")
+  processedAt  DateTime @default(now()) @map("processed_at") @db.Timestamptz
+
+  @@id([eventId, consumerName])
+  @@map("inbox_messages")
+  @@schema("platform")
+}
+
+model IdempotencyKey {
+  id             String   @id @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  actorId        String?  @map("actor_id") @db.Uuid
+  key            String
+  requestHash    String   @map("request_hash")
+  responseJson   Json?    @map("response_json")
+  status         String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([organizationId, key])
+  @@map("idempotency_keys")
+  @@schema("platform")
+}
+
+model AuditLog {
+  id             String   @id @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  action         String
+  module         String
+  entity         String
+  entityId       String?  @map("entity_id") @db.Uuid
+  before         Json?
+  after          Json?
+  ip             String?
+  userAgent      String?  @map("user_agent")
+  correlationId  String   @map("correlation_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+  @@schema("platform")
+}
+
+model FileObject {
+  id             String   @id @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  bucket         String
+  objectKey      String   @map("object_key")
+  mimeType       String   @map("mime_type")
+  sizeBytes      Int      @map("size_bytes")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("file_objects")
+  @@schema("platform")
+}

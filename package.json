@@ -1,0 +1,41 @@
+{
+  "name": "erp",
+  "private": true,
+  "packageManager": "pnpm@10.15.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:api": "turbo dev --filter=@erp/api",
+    "dev:web": "turbo dev --filter=@erp/web",
+    "dev:worker": "pnpm --filter @erp/api worker:dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "db:generate": "pnpm --filter @erp/api prisma:generate",
+    "db:migrate": "pnpm --filter @erp/api prisma:migrate",
+    "db:migrate:deploy": "pnpm --filter @erp/api prisma:migrate:deploy",
+    "docker:up": "docker compose up -d postgres redis-cache redis-queue rabbitmq minio mailhog",
+    "docker:down": "docker compose down",
+    "docker:ps": "docker compose ps"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "turbo": "^2.5.6",
+    "typescript": "^5.9.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma",
+      "sharp",
+      "unrs-resolver",
+      "msgpackr-extract"
+    ]
+  }
+}
