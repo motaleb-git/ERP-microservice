@@ -1,4 +1,6 @@
-# ERP Management System
+# ERP Management System with Microservices Architecture
+
+I’ve been working on an enterpris
 
 Production-grade enterprise ERP (modular monolith, SaaS-ready).
 
